@@ -1,0 +1,1142 @@
+---
+title: "R_project: Programmation et traitement statistique des données"
+author: "MC-MF"
+date: "2025-11-11"
+output: html_document
+---
+
+# Question 1
+
+$$\hat{f}^{',1}_n(x) = \frac{\hat{h}'_n(x)}{\hat{g}_n(x)} -  \frac{\hat{h}_n(x)\hat{g}'_n(x)}{\hat{g}_n(x)^2}$$
+$$\hat{f}^{',2}_n(x) = \frac{\hat{h}'_n(x)}{g(x)} - \frac{\hat{h}_n(x)g'(x)}{g(x)^2}$$
+$$\hat{f}^{',3}_n(x) = \frac{1}{n}\sum_{k=1}^n \frac{Y_k}{g(X_k)h_k^2}K'(\frac{x-X_k}{h_k})$$
+
+$$\hat{h}_n(x) = \frac{1}{n} \sum_{k=1}^n \frac{Y_k}{h_k}K(\frac{x-X_k}{h_k})$$
+
+$$\hat{h}'_n(x) = \frac{1}{n} \sum_{k=1}^n \frac{Y_k}{h_k^2}K'(\frac{x-X_k}{h_k})$$
+
+
+$$\hat{g}_n(x) = \frac{1}{n}\sum_{k=1}^n\frac{1}{h_k}K(\frac{x-X_k}{h_k})$$
+
+```{r}
+N <- 10000 # sample size
+alpha <- 0.3 # value given in the paper obtained with CV
+h <- (1:N)^(-alpha)# bandwidth
+
+h_N <- function(x) {
+  return((1/N)*(sum((Y_N/h)*K((x-X_N)/h))))
+}
+g_N <- function(x) {
+  return((1/N)*(sum((1/h)*K((x-X_N)/h))))
+}
+h_N_prime <- function(x) {
+  return((1/N)*(sum((Y_N/h^2)*K_prime((x-X_N)/h))))
+}
+g_N_prime <- function(x) {
+  return((1/N)*(sum((1/h^2)*K_prime((x-X_N)/h))))
+}
+es_n1 <- function(x) { # recursive version of Nadaraya Watson (Parzen 1962; Rosenblatt 1956)
+  return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+}
+es_n2 <- function(x) { # Johnston (1982)
+  return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+}
+es_n3 <- function(x) { # Wand and Jones (1995)
+  return((1/N)*(sum((Y_N/(g(x)*h^2))*K_prime((x-X_N)/h))))
+}
+```
+
+# Question 2: Simulations
+
+## Bandwidth Selection with Cross-Validation
+
+Alpha would depend on the chosen kernel (among gaussian, epanechnikov, quadratic) and on the chosen non parametric estimator.
+
+Here we take K from Epanechnikov and we evaluate alpha depending on the chosen estimator in recursive form (original, Johnston, Wand)).
+
+All along we will deal with $$X \sim U[0, 1] \Rightarrow \hat{f}^{',2} = \hat{f}^{',3}$$
+
+```{r}
+f <- function(x) { # primitive of target function
+  return((x+2)*sin(4*pi*x^2)+2*sin(8*pi*x))
+}
+f_prime <- function(x) { # target function
+  return(sin(4*pi*x^2)+8*pi*x*(x+2)*cos(4*pi*x^2) + 8*pi*cos(8*pi*x))
+}
+g <- function(x) { # density of X
+  return(1)
+}
+g_prime <- function(x){
+  return(0)
+}
+```
+
+```{r}
+# data generation
+N <- 2500 # sample size
+eps <- rnorm(N, 0, 1) # error term
+X <- runif(N, 0, 1) # X ~ U[0, 1] with density g
+Y <- f(X) + eps # (Y, X) non parametric relation
+```
+
+```{r}
+K <- function(x) { # Epanechnikov kernel
+  return(ifelse(abs(x) <= 1, (3/4)*(1-x^2), 0)) 
+}
+K_prime <- function(x) { # derivative of kernel
+  return(ifelse(abs(x) <= 1, -(3/2)*x, 0))
+}
+```
+
+```{r}
+# Cross Validation function
+CV_es1 <- function(alpha) { # CV for each estimator given K, g, f, X, Y
+    cv_score <- 0
+    h <- (1:N)^(-alpha)
+    H <- h # saving for LOOCV
+    for (k in 1:length(X)) { # proceeding to LOOCV
+      # cv_[1](X_(-1)) + ...cv_[k](X_(-k) + ... + cv_[n](X_(-n))
+      X_N <- X # (X_1, ..., X_N)
+      Y_N <- Y # (Y_1, ..., Y_N)
+      h <- H[-k] # leaving one out
+      X_N <- X_N[-k] # leaving one out
+      Y_N <- Y_N[-k] # leaving one out
+      es_n1 <- function(x) {
+        return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+      }
+      h_N <- function(x) {# p(Y_N,X_N,h) => impacted by LOOCV
+        return((1/(length(X_N)))*(sum((Y_N/h)*K((x-X_N)/h))))
+      }
+      g_N <- function(x) {# p(X_N,h) => impacted by LOOCV
+        return((1/(length(X_N)))*(sum((1/h)*K((x-X_N)/h))))
+      }
+      h_N_prime <- function(x) {# p(Y_N,X_N,h) => impacted by LOOCV
+        return((1/(length(X_N)))*(sum((Y_N/h^2)*K_prime((x-X_N)/h))))
+      }
+      g_N_prime <- function(x) {# p(X_N,h) => impacted by LOOCV
+        return((1/(length(X_N)))*(sum((1/h^2)*K_prime((x-X_N)/h))))
+      }
+      cv_score <- cv_score + (1/N)*(es_n1(X[k]) - f_prime(X[k]))^2
+    }
+      return(cv_score)
+  }
+
+CV_es2 <- function(alpha) { # CV for each estimator given K, g, f, X, Y
+    cv_score <- 0
+    h <- (1:N)^(-alpha)
+    H <- h # saving for LOOCV
+    for (k in 1:length(X)) { # proceeding to LOOCV
+      X_N <- X # (X_1, ..., X_N)
+      Y_N <- Y # (Y_1, ..., Y_N)
+      h <- H[-k] # leaving one out
+      X_N <- X_N[-k] # leaving one out
+      Y_N <- Y_N[-k] # leaving one out
+      es_n2 <- function(x) {
+        return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+      }
+      h_N <- function(x) {# p(Y_N,X_N,h) => impacted by LOOCV
+        return((1/length(X_N))*(sum((Y_N/h)*K((x-X_N)/h))))
+      }
+      g_N <- function(x) {# p(X_N,h) => impacted by LOOCV
+        return((1/length(X_N))*(sum((1/h)*K((x-X_N)/h))))
+      }
+      h_N_prime <- function(x) {# p(Y_N,X_N,h) => impacted by LOOCV
+        return((1/length(X_N))*(sum((Y_N/h^2)*K_prime((x-X_N)/h))))
+      }
+      g_N_prime <- function(x) {# p(X_N,h) => impacted by LOOCV
+        return((1/length(X_N))*(sum((1/h^2)*K_prime((x-X_N)/h))))
+      }
+      cv_score <- cv_score + (1/N)*(es_n2(X[k]) - f_prime(X[k]))^2
+    }
+    return(cv_score)
+  }
+```
+
+```{r}
+# Optimal bandwidth for Kernel 1 and es_n1, es_n2, es_n3
+library(stats)
+res_es1 <- optim(par=0.3, fn = CV_es1, lower = 1/5, upper=1/2, method="L-BFGS-B")
+alpha_star_es1 <-res_es1$par
+alpha_star_es1
+res_es2 <- optim(par=0.3, fn = CV_es2, lower = 1/5, upper=1/2, method="L-BFGS-B")
+alpha_star_es2 <-res_es2$par
+alpha_star_es2
+```
+```{r}
+# global functions reinit
+f <- function(x) {
+  return((x+2)*sin(4*pi*x^2)+2*sin(8*pi*x))
+}
+f_prime <- function(x) {
+  return(sin(4*pi*x^2)+8*pi*x*(x+2)*cos(4*pi*x^2) + 8*pi*cos(8*pi*x))
+}
+
+h_N <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((Y_N/h)*K((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+g_N <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((1/h)*K((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+h_N_prime <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((Y_N/h^2)*K_prime((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+g_N_prime <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((1/h^2)*K_prime((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+# estimators
+es_n1 <- function(x) {
+  return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+}
+es_n2 <- function(x) {
+  return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+}
+# density of X
+g <- function(x) {
+  return(1)
+}
+g_prime <- function(x){
+  return(0)
+}
+```
+
+
+## Figure 1 (almost sure convergence of three estimators) with Epanechnikov Kernel
+
+```{r}
+library(gridExtra)
+alpha <- alpha_star_es1
+h <- (1:N)^(-alpha) # bandwidth
+u1 <- es_n1(x)
+alpha <- alpha_star_es2
+u2 <- es_n2(x)
+h <- (1:N)^(-alpha) # bandwidth
+library(ggplot2)
+x <- seq(0, 1, length.out = 1000) # plot on interval 0, 1
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), u1, u2),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g1 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(EK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+alpha <-  1/3 # obtained by trial-error from alpha*L00CV from histograms plot
+h <- (1:N)^(-alpha) # bandwidth
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g2 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(EK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+g3 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(EK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+grid.arrange(g1, g2, g3, ncol = 2)
+```
+
+```{r}
+K <- function(x) { # gaussian kernel
+  return(dnorm(x)) 
+}
+K_prime <- function(x) { # derivative
+  return(-(x*dnorm(x)))
+}
+```
+
+```{r}
+# Optimal bandwidth for Kernel 2 and es_n1, es_n2, es_n3
+# Optimal bandwidth for Kernel 1 and es_n1, es_n2, es_n3
+library(stats)
+res_es1 <- optim(par=0.3, fn = CV_es1, lower = 1/5, upper=1/2, method="L-BFGS-B")
+alpha_star_es1 <-res_es1$par
+alpha_star_es1
+res_es2 <- optim(par=0.3, fn = CV_es2, lower = 1/5, upper=1/2, method="L-BFGS-B")
+alpha_star_es2 <-res_es2$par
+alpha_star_es2
+```
+
+
+## Figure 1 (almost sure convergence of three estimators) with gaussian kernel
+
+```{r}
+library(gridExtra)
+alpha <- 0.5
+h <- (1:N)^(-alpha) # bandwidth
+u1 <- es_n1(x)
+alpha <- 0.5
+u2 <- es_n2(x)
+h <- (1:N)^(-alpha) # bandwidth
+library(ggplot2)
+x <- seq(0, 1, length.out = 1000) # plot on interval 0, 1
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), u1, u2),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g1 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(GK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+alpha <-  1/3 # obtained by trial-error from alpha*L00CV from histograms plot
+h <- (1:N)^(-alpha) # bandwidth
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g2 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(GK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+g3 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(GK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+grid.arrange(g1, g2, g3, ncol = 2)
+```
+
+
+```{r}
+K <- function(x) { # quadratic kernel
+  return(ifelse(abs(x) <= 1, (15/16)*(1-x^2)^2, 0))
+}
+K_prime <- function(x) { # its derivative
+  return(ifelse(abs(x) <= 1, -(15/4)*(x)*(1-x^2), 0))
+}
+```
+
+```{r}
+library(stats)
+res_es1 <- optim(par=0.3, fn = CV_es1, lower = 1/5, upper=1/2, method="L-BFGS-B")
+alpha_star_es1 <-res_es1$par
+alpha_star_es1
+res_es2 <- optim(par=0.3, fn = CV_es2, lower = 1/5, upper=1/2, method="L-BFGS-B")
+alpha_star_es2 <-res_es2$par
+alpha_star_es2
+```
+
+```{r}
+library(gridExtra)
+library(ggplot2)
+alpha <- 0.418
+h <- (1:N)^(-alpha) # bandwidth
+u1 <- es_n1(x)
+alpha <- 0.372
+u2 <- es_n2(x)
+h <- (1:N)^(-alpha) # bandwidth
+x <- seq(0, 1, length.out = 1000) # plot on interval 0, 1
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), u1, u2),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g1 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(CK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+alpha <-  1/3 # obtained by trial-error from alpha*L00CV from histograms plot
+h <- (1:N)^(-alpha) # bandwidth
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g2 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(QK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+alpha <-  0.8 # obtained by trial-error from alpha*L00CV from histograms plot
+h <- (1:N)^(-alpha) # bandwidth
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+g3 <- ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(QK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+
+grid.arrange(g1, g2, g3, ncol = 2)
+```
+
+
+## Simulation Implementation
+
+```{r}
+# APPLY CONSTRAINT ON ALPHA FOR THEOREM 3.2
+# APPLY LOOCV with ES_N1, ES_N2, ES_N3, EK, GK, QK => alpha* = 1/3
+N <- 20000 # sample size
+alpha <- 1/3 # optimal bandwidth by LOOCV under theoretical constraints
+
+h <- (1:N)^(-alpha) # bandwidth
+```
+
+```{r}
+# data generation
+eps_N <- rnorm(N, 0, 1) # error term
+X_N <- runif(N, 0, 1) # X ~ U[0, 1]
+Y_N <- f(X_N) + eps_N # Non parametric relation between X and Y
+```
+
+```{r}
+# global functions and data generation
+f <- function(x) {
+  return((x+2)*sin(4*pi*x^2)+2*sin(8*pi*x))
+}
+f_prime <- function(x) {
+  return(sin(4*pi*x^2)+8*pi*x*(x+2)*cos(4*pi*x^2) + 8*pi*cos(8*pi*x))
+}
+
+h_N <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((Y_N/h)*K((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+g_N <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((1/h)*K((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+h_N_prime <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((Y_N/h^2)*K_prime((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+g_N_prime <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((1/h^2)*K_prime((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+# estimators
+es_n1 <- function(x) {
+  return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+}
+es_n2 <- function(x) {
+  return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+}
+# density of X
+g <- function(x) {
+  return(1)
+}
+g_prime <- function(x){
+  return(0)
+}
+```
+
+```{r}
+K <- function(x) {# epanechnikov kernel
+  return(ifelse(abs(x) <= 1, (3/4)*(1-x^2), 0)) 
+}
+K_prime <- function(x) { # derivative
+  return(ifelse(abs(x) <= 1, -(3/2)*x, 0))
+}
+```
+
+## Figure 1 (almost sure convergence of three estimators) with Epanechnikov Kernel
+
+```{r}
+alpha <-  1/3 # obtained by trial-error from alpha*L00CV from histograms plot
+h <- (1:N)^(-alpha) # bandwidth
+library(ggplot2)
+x <- seq(0, 1, length.out = 1000) # plot on interval 0, 1
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(EK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+```
+
+```{r}
+alpha <- 1/3 # optimal bandwidth by LOOCV
+h <- (1:N)^(-alpha) # bandwidth
+
+K <- function(x) { # gaussian kernel
+  return(dnorm(x)) 
+}
+K_prime <- function(x) { # derivative
+  return(-(x*dnorm(x)))
+}
+```
+
+## Figure 1 (almost sure convergence of three estimators) with Gaussian Kernel
+
+```{r}
+library(ggplot2)
+x <- seq(0, 1, length.out = 1000) # plot on interval 0, 1
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(GK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+```
+
+```{r}
+K <- function(x) { # quadratic kernel
+  return(ifelse(abs(x) <= 1, (15/16)*(1-x^2)^2, 0))
+}
+K_prime <- function(x) { # its derivative
+  return(ifelse(abs(x) <= 1, -(15/4)*(x)*(1-x^2), 0))
+}
+```
+
+## Figure 1 (almost sure convergence of three estimators) with Quadratic Kernel
+
+```{r}
+library(ggplot2)
+x <- seq(0, 1, length.out = 1000) # plot on interval 0, 1
+df <- data.frame( # plot of f', es_n1, es_n2, es_n3
+  x = rep(x, 3),
+  y = c(f_prime(x), es_n1(x), es_n2(x)),
+  curve_name = factor(rep(c("Target","Estimator 1", "Estimator 2"), each = length(x)))
+)
+ggplot(df, aes(x = x, y = y, color = curve_name, linetype = curve_name)) + # specifying the ggplot ; curve distinguishable by color and linetype
+  geom_line(size = 0.5) +
+  geom_point( # adding points gives better look
+    data = subset(df, curve_name != "Target"),
+    size = 0.5,
+  ) +
+  scale_linetype_manual(values = c("Target" = "solid", "Estimator 1" = "dotted", "Estimator 2" = "dotted")) + # setting of linetypes by curve
+  labs(
+    title = "(QK) Almost sure Convergence of fn'_1, fn'_2 to f'",
+    x = "x",
+    y = "y",
+    color = "Function",
+    linetype = "Function" # obtain a single legend applying for both colors and linetype
+  ) +
+  theme_classic()
+```
+
+```{r}
+# global functions and data generation
+f <- function(x) {
+  return((x+2)*sin(4*pi*x^2)+2*sin(8*pi*x))
+}
+f_prime <- function(x) {
+  return(sin(4*pi*x^2)+8*pi*x*(x+2)*cos(4*pi*x^2) + 8*pi*cos(8*pi*x))
+}
+# density of X
+g <- function(x) {
+  return(1)
+}
+g_prime <- function(x){
+  return(0)
+}
+```
+
+```{r}
+# Select Kernel for CLT result
+# epanechnikov kernel
+K <- function(x) {
+  return(ifelse(abs(x) <= 1, (3/4)*(1-x^2), 0)) 
+}
+K_prime <- function(x) {
+  return(ifelse(abs(x) <= 1, -(3/2)*x, 0))
+}
+```
+
+## Figure 2 (CLT) with Epanechnikov Kernel
+
+```{r}
+N <- 2000
+B <- 500
+x0 <- 0.5
+alpha <- 0.8
+x1 <- 0.8 
+par(mfrow=c(2,2))
+set.seed(123)
+ES1_X0 <- rep(NA, B)
+ES2_X0 <- rep(NA, B)
+ES1_X1 <- rep(NA, B)
+ES2_X1 <- rep(NA, B)
+for (b in 1:B) {
+  h <- (1:N)^(-alpha)
+  eps_N <- rnorm(N, 0, 1)
+  X_N <- runif(N, 0, 1)
+  Y_N <- f(X_N) + eps_N
+  h_N <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((Y_N/h)*K((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  g_N <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((1/h)*K((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  h_N_prime <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((Y_N/h^2)*K_prime((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  g_N_prime <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((1/h^2)*K_prime((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  es_n1 <- function(x) {
+    return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+    }
+  es_n2 <- function(x) {
+    return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+    }
+  ES1_X0[b] <- sqrt(N*(1/N^alpha)^3)*
+(es_n1(x0) - f_prime(x0))
+  ES2_X0[b] <- sqrt(N*(1/N^alpha)^3)*(es_n2(x0) - f_prime(x0))
+  ES1_X1[b] <- sqrt(N*(1/N^alpha)^3)*(es_n1(x1) - f_prime(x1))
+  ES2_X1[b] <- sqrt(N*(1/N^alpha)^3)*(es_n2(x1) - f_prime(x1))
+}
+
+VES1X0 <- c(mean(ES1_X0),sd(ES1_X0))
+VES1X1 <- c(mean(ES1_X1),sd(ES1_X1))
+VES2X0 <- c(mean(ES2_X0),sd(ES2_X0))
+VES2X1 <- c(mean(ES2_X1),sd(ES2_X1))
+nbins <- 10
+# estimator 1
+hist(main="", ES1_X0, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES1_X0)$y)*1.5))
+XVALS_ES1_X0 <- seq(min(ES1_X0), max(ES1_X0), length.out = 200)
+lines(XVALS_ES1_X0, dnorm(XVALS_ES1_X0, VES1X0[1], VES1X0[2]), col = "red", lwd = 2)
+hist(main="", ES1_X1, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES1_X1)$y)*1.5))
+XVALS_ES1_X1 <- seq(min(ES1_X1), max(ES1_X1), length.out = 200)
+lines(XVALS_ES1_X1, dnorm(XVALS_ES1_X1, VES1X1[1], VES1X1[2]), col = "red", lwd = 2)
+# estimator 2
+hist(main="", ES2_X0, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES2_X0)$y)*1.5))
+XVALS_ES2_X0 <- seq(min(ES2_X0), max(ES2_X0), length.out = 200)
+lines(XVALS_ES2_X0, dnorm(XVALS_ES2_X0, VES2X0[1], VES2X0[2]), col = "red", lwd = 2)
+hist(main="", ES2_X1, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES2_X1)$y)*1.5))
+XVALS_ES2_X1 <- seq(min(ES2_X1), max(ES2_X1), length.out = 200)
+lines(XVALS_ES2_X1, dnorm(XVALS_ES2_X1, VES2X1[1], VES2X1[2]), col = "red", lwd = 2)
+```
+
+```{r}
+K <- function(x) {# gaussian kernel
+  return(dnorm(x)) 
+}
+K_prime <- function(x) {# deriv
+  return(-(x*(K(x))))
+}
+```
+
+## Figure 2 (CLT) with Gaussian Kernel
+
+```{r}
+N <- 2000
+B <- 500
+x0 <- 0.5
+alpha <- 0.9
+x1 <- 0.8
+par(mfrow=c(3,2))
+
+set.seed(123)
+ES1_X0 <- rep(NA, B)
+ES2_X0 <- rep(NA, B)
+ES1_X1 <- rep(NA, B)
+ES2_X1 <- rep(NA, B)
+for (b in 1:B) {
+  h <- (1:N)^(-alpha)
+  eps_N <- rnorm(N, 0, 1)
+  X_N <- runif(N, 0, 1)
+  Y_N <- f(X_N) + eps_N
+  h_N <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((Y_N/h)*K((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  g_N <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((1/h)*K((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  h_N_prime <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((Y_N/h^2)*K_prime((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  g_N_prime <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((1/h^2)*K_prime((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  es_n1 <- function(x) {
+    return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+    }
+  es_n2 <- function(x) {
+    return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+    }
+  ES1_X0[b] <- sqrt(N*(1/N^alpha)^3)*
+(es_n1(x0) - f_prime(x0))
+  ES2_X0[b] <- sqrt(N*(1/N^alpha)^3)*(es_n2(x0) - f_prime(x0))
+  ES1_X1[b] <- sqrt(N*(1/N^alpha)^3)*(es_n1(x1) - f_prime(x1))
+  ES2_X1[b] <- sqrt(N*(1/N^alpha)^3)*(es_n2(x1) - f_prime(x1))
+}
+
+VES1X0 <- c(mean(ES1_X0),sd(ES1_X0))
+VES1X1 <- c(mean(ES1_X1),sd(ES1_X1))
+VES2X0 <- c(mean(ES2_X0),sd(ES2_X0))
+VES2X1 <- c(mean(ES2_X1),sd(ES2_X1))
+nbins <- 10
+XVALS_ES1_X0 <- seq(min(ES1_X0), max(ES1_X0), length.out = 200)
+hist(main="", ES1_X0, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES1_X0)$y)*1.5))
+lines(XVALS_ES1_X0, dnorm(XVALS_ES1_X0, VES1X0[1], VES1X0[2]), col = "red", lwd = 2)
+hist(main="", ES1_X1, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES1_X1)$y)*1.5))
+XVALS_ES1_X1 <- seq(min(ES1_X1), max(ES1_X1), length.out = 200)
+lines(XVALS_ES1_X1, dnorm(XVALS_ES1_X1, VES1X1[1], VES1X1[2]), col = "red", lwd = 2)
+
+XVALS_ES2_X0 <- seq(min(ES2_X0), max(ES2_X0), length.out = 200)
+hist(main="", ES2_X0, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES2_X0)$y)*1.5))
+lines(XVALS_ES2_X0, dnorm(XVALS_ES2_X0, VES2X0[1], VES2X0[2]), col = "red", lwd = 2)
+hist(main="", ES2_X1, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES2_X1)$y)*1.5))
+XVALS_ES2_X1 <- seq(min(ES2_X1), max(ES2_X1), length.out = 200)
+lines(XVALS_ES2_X1, dnorm(XVALS_ES2_X1, VES2X1[1], VES2X1[2]), col = "red", lwd = 2)
+```
+
+```{r}
+# quadratic kernel
+K <- function(x) {
+  return(ifelse(abs(x) <= 1, (15/16)*(1-x^2)^2, 0))
+}
+K_prime <- function(x) {
+  return(ifelse(abs(x) <= 1, -(15/4)*(x)*(1-x^2), 0))
+}
+```
+
+## Figure 2 (CLT) with Quadratic Kernel
+
+```{r}
+N <- 2000
+B <- 500
+x0 <- 0.5
+alpha <- 0.83 # to obtain centered for both x0 and x1; though not a.s. conv on x1 with alpha != 1/3 high variance may explain why centered ? x0 centered on a.s. conv plot at alpha in (0.319 +- epsilon) and f^2(x0) = 0, see normality convergence on paper
+x1 <- 0.8
+par(mfrow=c(3,2))
+
+set.seed(123)
+ES1_X0 <- rep(NA, B)
+ES2_X0 <- rep(NA, B)
+ES1_X1 <- rep(NA, B)
+ES2_X1 <- rep(NA, B)
+for (b in 1:B) {
+  h <- (1:N)^(-alpha)
+  eps_N <- rnorm(N, 0, 1)
+  X_N <- runif(N, 0, 1)
+  Y_N <- f(X_N) + eps_N
+  h_N <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((Y_N/h)*K((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  g_N <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((1/h)*K((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  h_N_prime <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((Y_N/h^2)*K_prime((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  g_N_prime <- function(x) {
+    y <- rep(NA, length(x))
+    for (j in 1:length(x)) {
+      y[j] <- (1/N)*(sum((1/h^2)*K_prime((x[j]-X_N)/h)))
+    }
+    return(y)
+  }
+  es_n1 <- function(x) {
+    return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+    }
+  es_n2 <- function(x) {
+    return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+    }
+  ES1_X0[b] <- sqrt(N*(1/N^alpha)^3)*
+(es_n1(x0) - f_prime(x0))
+  ES2_X0[b] <- sqrt(N*(1/N^alpha)^3)*(es_n2(x0) - f_prime(x0))
+  ES1_X1[b] <- sqrt(N*(1/N^alpha)^3)*(es_n1(x1) - f_prime(x1))
+  ES2_X1[b] <- sqrt(N*(1/N^alpha)^3)*(es_n2(x1) - f_prime(x1))
+}
+
+VES1X0 <- c(mean(ES1_X0),sd(ES1_X0))
+VES1X1 <- c(mean(ES1_X1),sd(ES1_X1))
+VES2X0 <- c(mean(ES2_X0),sd(ES2_X0))
+VES2X1 <- c(mean(ES2_X1),sd(ES2_X1))
+nbins <- 10
+XVALS_ES1_X0 <- seq(min(ES1_X0), max(ES1_X0), length.out = 200)
+hist(main="", ES1_X0, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES1_X0)$y)*1.5))
+lines(XVALS_ES1_X0, dnorm(XVALS_ES1_X0, VES1X0[1], VES1X0[2]), col = "red", lwd = 2)
+hist(main="", ES1_X1, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES1_X1)$y)*1.5))
+XVALS_ES1_X1 <- seq(min(ES1_X1), max(ES1_X1), length.out = 200)
+lines(XVALS_ES1_X1, dnorm(XVALS_ES1_X1, VES1X1[1], VES1X1[2]), col = "red", lwd = 2)
+
+XVALS_ES2_X0 <- seq(min(ES2_X0), max(ES2_X0), length.out = 200)
+hist(main="", ES2_X0, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES2_X0)$y)*1.5))
+lines(XVALS_ES2_X0, dnorm(XVALS_ES2_X0, VES2X0[1], VES2X0[2]), col = "red", lwd = 2)
+hist(main="", ES2_X1, breaks=nbins, freq = FALSE, col = "blue",
+     xlab = "", ylim = c(0, max(density(ES2_X1)$y)*1.5))
+XVALS_ES2_X1 <- seq(min(ES2_X1), max(ES2_X1), length.out = 200)
+lines(XVALS_ES2_X1, dnorm(XVALS_ES2_X1, VES2X1[1], VES2X1[2]), col = "red", lwd = 2)
+
+```
+## Question 3: Comparing Kernels with MSE criterion
+## x = 0.5 and x = 0.8
+## Question : Comparing Kernels with MISE criterion
+
+```{r}
+set.seed(123)
+# Setting
+
+# data generation parameters
+alpha <- 1/3 # optimal bandwidth by LOOCV
+h <- (1:N)^(-alpha) # bandwidth
+N <- 1000 # sample size per batch
+B <- 500 # batch
+
+x = c(0.5, 0.8) # values for MSE
+d <- rep(1/N, N) # discretizing tool for MISE
+x_d <- (1:N)/N # x_val for MISE
+```
+
+```{r}
+# global functions and data generation
+f <- function(x) {
+  return((x+2)*sin(4*pi*x^2)+2*sin(8*pi*x))
+}
+f_prime <- function(x) {
+  return(sin(4*pi*x^2)+8*pi*x*(x+2)*cos(4*pi*x^2) + 8*pi*cos(8*pi*x))
+}
+
+h_N <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((Y_N/h)*K((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+g_N <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((1/h)*K((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+h_N_prime <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((Y_N/h^2)*K_prime((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+g_N_prime <- function(x) {
+  y <- rep(NA, length(x))
+  for (j in 1:length(x)) {
+    y[j] <- (1/N)*(sum((1/h^2)*K_prime((x[j]-X_N)/h)))
+  }
+  return(y)
+}
+# estimators
+es_n1 <- function(x) {
+  return((h_N_prime(x)/g_N(x)) - (h_N(x)*g_N_prime(x))/(g_N(x))^2)
+}
+es_n2 <- function(x) {
+  return((h_N_prime(x)/g(x)) - (h_N(x)*g_prime(x))/(g(x))^2)
+}
+# density of X
+g <- function(x) {
+  return(1)
+}
+g_prime <- function(x){
+  return(0)
+}
+```
+
+
+```{r}
+# Kernel 1 EK
+K <- function(x) {
+  return(ifelse(abs(x) <= 1, (3/4)*(1-x^2), 0)) 
+}
+K_prime <- function(x) {
+  return(ifelse(abs(x) <= 1, -(3/2)*x, 0))
+}
+
+ES1_X0_K1 <- rep(NA, B)
+ES2_X0_K1 <- rep(NA, B)
+ES1_X1_K1 <- rep(NA, B)
+ES2_X1_K1 <- rep(NA, B)
+for (b in 1:B) {
+  eps_N <- rnorm(N, 0, 1) # error term
+  X_N <- runif(N, 0, 1) # X ~ U[0, 1]
+  Y_N <- f(X_N) + eps_N # Non parametric relation between X and Y
+  ES1_X0_K1[b] <- es_n1(x0) 
+  ES2_X0_K1[b] <- es_n2(x0)
+  ES1_X1_K1[b] <- es_n1(x1)
+  ES2_X1_K1[b] <- es_n2(x1)
+}
+MSE_ES1_K1_X0 = mean((ES1_X0_K1 - f_prime(x0))^2) + var(ES1_X0_K1)
+MSE_ES2_K1_X0 = mean((ES2_X0_K1 - f_prime(x0))^2) + var(ES2_X0_K1)
+MSE_ES1_K1_X1 = mean((ES1_X1_K1 - f_prime(x1))^2) + var(ES1_X1_K1)
+MSE_ES2_K1_X1 = mean((ES2_X1_K1 - f_prime(x1))^2) + var(ES2_X1_K1)
+
+# Kernel 2 GK
+
+K <- function(x) {
+  return(dnorm(x)) 
+}
+K_prime <- function(x) {
+  return(-(x*(K(x))))
+}
+
+alpha <- 1/3
+
+ES1_X0_K2 <- rep(NA, B)
+ES2_X0_K2 <- rep(NA, B)
+ES1_X1_K2 <- rep(NA, B)
+ES2_X1_K2 <- rep(NA, B)
+for (b in 1:B) {
+  e <- rnorm(N, 0, 1)
+  X <- runif(N, 0, 1)
+  Y <- f(X) + e
+  ES1_X0_K2[b] <- es_n1(x0)
+  ES2_X0_K2[b] <- es_n2(x0)
+  ES1_X1_K2[b] <- es_n1(x1)
+  ES2_X1_K2[b] <- es_n2(x1)
+}
+MSE_ES1_K2_X0 = mean((ES1_X0_K2 - f_prime(x0))^2) + var(ES1_X0_K2)
+MSE_ES2_K2_X0 = mean((ES2_X0_K2 - f_prime(x0))^2) + var(ES2_X0_K2)
+MSE_ES1_K2_X1 = mean((ES1_X1_K2 - f_prime(x1))^2) + var(ES1_X1_K2)
+MSE_ES2_K2_X1 = mean((ES2_X1_K2 - f_prime(x1))^2) + var(ES2_X1_K2)
+
+# Kernel 3 QK
+
+K <- function(x) {
+  return(ifelse(abs(x) <= 1, (15/16)*(1-x^2)^2, 0))
+}
+K_prime <- function(x) {
+  return(ifelse(abs(x) <= 1, -(15/4)*(x)*(1-x^2), 0))
+}
+
+ES1_X0_K3 <- rep(NA, B)
+ES2_X0_K3 <- rep(NA, B)
+ES1_X1_K3 <- rep(NA, B)
+ES2_X1_K3 <- rep(NA, B)
+for (b in 1:B) {
+  e <- rnorm(N, 0, 1)
+  X <- runif(N, 0, 1)
+  Y <- f(X) + e
+  ES1_X0_K3[b] <- es_n1(x0)
+  ES2_X0_K3[b] <- es_n2(x0)
+  ES1_X1_K3[b] <- es_n1(x1)
+  ES2_X1_K3[b] <- es_n2(x1)
+}
+MSE_ES1_K3_X0 = mean((ES1_X0_K3 - f_prime(x0))^2) + var(ES1_X0_K3)
+MSE_ES2_K3_X0 = mean((ES2_X0_K3 - f_prime(x0))^2) + var(ES2_X0_K3)
+MSE_ES1_K3_X1 = mean((ES1_X1_K3 - f_prime(x1))^2) + var(ES1_X1_K3)
+MSE_ES2_K3_X1 = mean((ES2_X1_K3 - f_prime(x1))^2) + var(ES2_X1_K3)
+
+print("MSE for K1")
+c(MSE_ES1_K1_X0, MSE_ES2_K1_X0, MSE_ES1_K1_X1, MSE_ES2_K1_X1)
+print("MSE for K2")
+c(MSE_ES1_K2_X0, MSE_ES2_K2_X0, MSE_ES1_K2_X1, MSE_ES2_K2_X1)
+print("MSE for K3")
+c(MSE_ES1_K3_X0, MSE_ES2_K3_X0, MSE_ES1_K3_X1, MSE_ES2_K3_X1)
+# Interpretation for x0: Optimality for x0 with epanechnikov kernel and Estimator 1 with alpha btw [1/5, 1/3]
+# Interpretation for x1: Optimality for x1 with quadratic kernel and Estimator 1 with alpha btw [1/5, 1/3];
+```
